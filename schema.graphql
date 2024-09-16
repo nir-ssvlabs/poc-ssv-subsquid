@@ -1,0 +1,77 @@
+type Validator @entity {
+  id: ID!
+  network: String!
+  version: String!
+  ownerAddress: Bytes!
+  publicKey: Bytes!
+  operators: [BigInt!]!
+  cluster: String
+  shares: Bytes
+  sharesPublicKeys: [Bytes!]!
+  encryptedKeys: [String!]!
+  memo: String
+  blockNumber: BigInt!
+  logIndex: BigInt!
+  transactionIndex: BigInt!
+  addedAtBlockNumber: BigInt!
+  addedAtLogIndex: BigInt!
+  addedAtTransactionIndex: BigInt!
+  isValid: Boolean!
+  isDeleted: Boolean!
+  isLiquidated: Boolean!
+  ignoreOnSync: Boolean!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  isDraft: Boolean!
+  isPublicKeyValid: Boolean!
+  isSharesValid: Boolean!
+  isOperatorsValid: Boolean!
+}
+
+type Operator @entity {
+  id: ID!
+  operatorId: BigInt!
+  network: String!
+  version: String!
+  ownerAddress: Bytes!
+  publicKey: Bytes!
+  fee: BigInt!
+  previousFee: BigInt!
+  declaredFee: BigInt!
+  addressWhitelist: String
+  memo: String
+  blockNumber: BigInt!
+  isValid: Boolean!
+  isDeleted: Boolean!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  whitelistAddresses: [String!]!
+  isPrivate: Boolean!
+  whitelistingContract: String
+}
+
+type Cluster @entity {
+  id: ID!
+  clusterId: String!
+  network: String!
+  version: String!
+  ownerAddress: Bytes!
+  validatorCount: BigInt!
+  networkFeeIndex: BigInt!
+  index: BigInt!
+  balance: BigInt!
+  active: Boolean!
+  isLiquidated: Boolean!
+  operators: [BigInt!]!
+  blockNumber: BigInt!
+  createdAt: BigInt!
+  updatedAt: BigInt!
+}
+
+type Account @entity {
+  id: ID!
+  ownerAddress: String!
+  recipientAddress: String
+  network: String!
+  version: String!
+}
