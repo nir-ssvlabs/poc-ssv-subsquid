@@ -40,7 +40,7 @@ export class Cluster {
     @Column_("boolean", { nullable: false })
     isLiquidated!: boolean;
 
-    @Column_("numeric", { array: true, transformer: marshal.bigintTransformer, nullable: false })
+    @Column_("numeric", { array: true, transformer: marshal.bigintArrayTransformer, nullable: false })
     operators!: bigint[];
 
     @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })

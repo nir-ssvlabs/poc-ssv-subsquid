@@ -32,7 +32,7 @@ export class Event {
     blockNumber!: bigint;
 
     @Column_("text", { nullable: true })
-    ownerAddress?: string | null;
+    ownerAddress!: string;
 
     @Column_("jsonb", { nullable: false })
     rawData!: string;

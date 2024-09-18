@@ -2,14 +2,14 @@ type Validator @entity {
   id: ID!
   network: String!
   version: String!
-  ownerAddress: Bytes!
-  publicKey: Bytes!
+  ownerAddress: String!
+  publicKey: String!
   operators: [BigInt!]!
-  cluster: String
-  shares: Bytes
-  sharesPublicKeys: [Bytes!]!
+  cluster: String!
+  shares: String!
+  sharesPublicKeys: [String!]!
   encryptedKeys: [String!]!
-  memo: String
+  memo: [String!]!
   blockNumber: BigInt!
   logIndex: BigInt!
   transactionIndex: BigInt!
@@ -28,18 +28,19 @@ type Validator @entity {
   isOperatorsValid: Boolean!
 }
 
+
 type Operator @entity {
   id: ID!
   operatorId: BigInt!
   network: String!
   version: String!
-  ownerAddress: Bytes!
-  publicKey: Bytes!
+  ownerAddress: String!
+  publicKey: String!
   fee: BigInt!
   previousFee: BigInt!
   declaredFee: BigInt!
   addressWhitelist: String
-  memo: String
+  memo: [String!]!
   blockNumber: BigInt!
   isValid: Boolean!
   isDeleted: Boolean!
@@ -55,7 +56,7 @@ type Cluster @entity {
   clusterId: String!
   network: String!
   version: String!
-  ownerAddress: Bytes!
+  ownerAddress: String!
   validatorCount: BigInt!
   networkFeeIndex: BigInt!
   index: BigInt!
@@ -67,6 +68,7 @@ type Cluster @entity {
   createdAt: BigInt!
   updatedAt: BigInt!
 }
+
 
 type Account @entity {
   id: ID!

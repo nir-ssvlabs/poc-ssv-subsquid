@@ -37,8 +37,8 @@ export class Operator {
     @Column_("text", { nullable: true })
     addressWhitelist?: string | null;
 
-    @Column_("text", { nullable: true })
-    memo?: string | null;
+    @Column_("text", { array: true, nullable: true })
+    memo?: string[] | null;
 
     @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
     blockNumber!: bigint;

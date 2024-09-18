@@ -126,6 +126,19 @@ export function nonNull<T>(val: T | undefined | null): T {
     return val
 }
 
+export const bigintArrayTransformer = {
+    to(values?: bigint[]): string[] | null {
+        if (!values) return null;
+        // Convert each bigint to a string
+        return values.map((value) => value.toString());
+    },
+    from(values?: string[]): bigint[] | null {
+        if (!values) return null;
+        // Convert each string to a bigint
+        return values.map((value) => BigInt(value));
+    },
+};
+
 
 export const bigintTransformer = {
     to(x?: bigint) {

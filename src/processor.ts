@@ -9,8 +9,12 @@ import {
 } from '@subsquid/evm-processor'
 import { events } from './abi/ssvabi'
 
+const CONTRACT_ADDRESS = (process.env.CONTRACT_ADDRESS || "0x38A4794cCEd47d3baf7370CcC43B560D3a1beEFA").toLocaleLowerCase()
+const STARTING_BLOCK = parseInt(process.env.STARTING_BLOCK || "181612")
+const GATEWAY = process.env.GATEWAY || 'https://v2.archive.subsquid.io/network/ethereum-holesky'
+
 export const processor = new EvmBatchProcessor()
-    .setGateway('https://v2.archive.subsquid.io/network/ethereum-mainnet')
+    .setGateway(GATEWAY)
     .setRpcEndpoint({
         url: assertNotNull(process.env.RPC_ETH_HTTP, 'No RPC endpoint supplied'),
         rateLimit: 10
@@ -24,11 +28,18 @@ export const processor = new EvmBatchProcessor()
         },
     })
     .setBlockRange({
-        from: 17507480,
+        from: STARTING_BLOCK,
     })
     .addLog({
-        address: ['0xDD9BC35aE942eF0cFa76930954a156B3fF30a4E1'],
-        topic0: [events.ValidatorAdded.topic],
+        address: [CONTRACT_ADDRESS],
+        topic0: [
+            events.ValidatorAdded.topic,
+            events.ValidatorRemoved.topic,
+            events.OperatorAdded.topic,
+            events.OperatorFeeDeclared.topic,
+            events.OperatorFeeExecuted.topic,
+            events.OperatorRemoved.topic,
+        ],
     });
 
 export type Fields = EvmBatchProcessorFields<typeof processor>
