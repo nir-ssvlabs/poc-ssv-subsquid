@@ -13,7 +13,7 @@
     "dotenv": "^16.4.5",
     "ethers": "^5.7.2",
     "pg": "^8.12.0",
-    "ssv-keys": "https://github.com/ssvlabs/ssv-keys.git#9ed1a36bc9a0c79ed25ff5e7cdda61a5b53d3869",
+    "ssv-keys": "https://github.com/bloxapp/ssv-keys.git#v1.0.0.rc0",
     "bls-eth-wasm": "^1.0.5",
     "typeorm": "^0.3.20"
   },

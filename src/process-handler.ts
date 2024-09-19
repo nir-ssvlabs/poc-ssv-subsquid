@@ -1,15 +1,16 @@
 import {ethers} from "ethers";
 import {Validator, Operator, Account, Cluster, Event} from "./model";
-import {events, ValidatorAddedEventArgs} from "./abi/ssvabi";
+import {events} from "./abi/ssvabi";
 import {Log} from "./processor";
-import {Brackets, In} from 'typeorm';
-import {KeySharesItem} from 'ssv-keys';
+import {In} from 'typeorm';
+import {KeyShares} from 'ssv-keys';
 import bls from 'bls-eth-wasm';
 
 
 
+
 type EventHandlerMap = Partial<Record<keyof typeof events, (log: Log, ctx: any) => Promise<void>>>
-const keySharesItem = new KeySharesItem();
+const keyShares = new KeyShares();
 
 
 export const eventHandlerMap: EventHandlerMap = {
@@ -127,6 +128,7 @@ async function handleValidatorAdded(log: Log, ctx: any): Promise<void> {
     let { owner, operatorIds, publicKey, shares, cluster } = events.ValidatorAdded.decode(log);
     const id = `${publicKey}-${process.env.NETWORK}-${owner}`;
     ctx.log.info(`Adding validator ${publicKey} owned by ${owner} being registered to cluster with operators: ${operatorIds}`);
+    // console.log(`${shares} - shares`);
     const rawDataString = JSON.stringify(log, customReplaceHelper);
     let event = new Event({
         id: log.logIndex.toString(),
@@ -350,8 +352,14 @@ async function extractShares(item: Validator, ctx: any): Promise<void> {
     let ownerNonce: number | null = null;
 
     try {
-        const shares = keySharesItem.buildSharesFromBytes(item.shares, item.operators.length);
+        ctx.log.info(`Got sharesPublicKeys ${item.shares}`);
+        console.log('Type of item.shares:', typeof item.shares);
+        console.log('Operator count:', item.operators.length);
+        const shares = keyShares.buildSharesFromBytes(item.shares, item.operators.length);
         const { sharesPublicKeys, encryptedKeys } = shares;
+
+        ctx.log.info(`Got sharesPublicKeys ${sharesPublicKeys}`);
+        ctx.log.info(`Got encryptedKeys ${encryptedKeys}`);
         item.sharesPublicKeys = sharesPublicKeys;
         item.encryptedKeys = encryptedKeys;
     } catch (e) {
@@ -379,7 +387,7 @@ async function extractShares(item: Validator, ctx: any): Promise<void> {
                 ownerAddress: item.ownerAddress,
             };
             ctx.log.info(`created fromSignatureData`);
-            await keySharesItem.validateSingleShares(item.shares, fromSignatureData);
+            await keyShares.validateSingleShares(item.shares, fromSignatureData);
             ctx.log.info(`Finished validateSingleShares`);
         } catch (e) {
             error = e;
