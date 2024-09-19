@@ -1,8 +1,8 @@
 import {ethers} from "ethers";
-import {Validator, Operator, Account, Cluster} from "./model";
+import {Validator, Operator, Account, Cluster, Event} from "./model";
 import {events, ValidatorAddedEventArgs} from "./abi/ssvabi";
 import {Log} from "./processor";
-import { In } from 'typeorm';
+import {Brackets, In} from 'typeorm';
 import {KeySharesItem} from 'ssv-keys';
 import bls from 'bls-eth-wasm';
 
@@ -57,9 +57,7 @@ async function handleOperatorAdded(log: Log, ctx: any): Promise<void>  {
         whitelistingContract: '',
     });
 
-    console.log('Operator instance:', operator);
-    // console.log('Operator instanceof Operator:', operator instanceof Operator);
-
+    // console.log('Operator instance:', operator);
     try {
         await ctx.store.upsert([operator]);
         ctx.log.info(`Operator ${operatorId} successfully added!`);
@@ -126,12 +124,26 @@ async function handleOperatorFeeExecuted(log: Log, ctx: any): Promise<void> {
 }
 
 async function handleValidatorAdded(log: Log, ctx: any): Promise<void> {
-    let eventData:ValidatorAddedEventArgs = events.ValidatorAdded.decode(log);
-    ctx.log.info(eventData)
     let { owner, operatorIds, publicKey, shares, cluster } = events.ValidatorAdded.decode(log);
     const id = `${publicKey}-${process.env.NETWORK}-${owner}`;
     ctx.log.info(`Adding validator ${publicKey} owned by ${owner} being registered to cluster with operators: ${operatorIds}`);
-
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    let event = new Event({
+        id: log.logIndex.toString(),
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: 'ValidatorAdded',
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event ValidatorAdded with public key: ${publicKey}.`);
     // Check if the validator already exists in the database
     const existingValidator = await ctx.store.get(Validator, {
         where: { id: id },
@@ -175,6 +187,7 @@ async function handleValidatorAdded(log: Log, ctx: any): Promise<void> {
 
     // await ctx.store.upsert([validator]);
     ctx.log.info(`validator ${publicKey} with operators ${validator.operators} and cluster ${validator.cluster} successfully added!`);
+
 }
 
 function generateClusterId(owner: string, operatorIds: (number | bigint)[]): string {
@@ -216,7 +229,7 @@ async function validateOperators(item: Validator, ctx: any):Promise<void> {
                 message,
                 error: (e as Error).stack || '',
                 data: (e as Error).message,
-                blockNumber: item.blockNumber,
+                blockNumber: item.blockNumber.toString(),
             }),
         ];
         ctx.log.error(
@@ -319,8 +332,8 @@ async function processValidator(item: Validator, ctx: any): Promise<void> {
                     inEvent: item.ownerAddress,
                 },
                 blockNumber: {
-                    inDatabase: foundItem.blockNumber,
-                    inEvent: item.blockNumber,
+                    inDatabase: foundItem.blockNumber.toString(),
+                    inEvent: item.blockNumber.toString(),
                 },
             })
         ];
@@ -338,7 +351,6 @@ async function extractShares(item: Validator, ctx: any): Promise<void> {
 
     try {
         const shares = keySharesItem.buildSharesFromBytes(item.shares, item.operators.length);
-        ctx.log.info(`created shares ${shares}`);
         const { sharesPublicKeys, encryptedKeys } = shares;
         item.sharesPublicKeys = sharesPublicKeys;
         item.encryptedKeys = encryptedKeys;
@@ -352,14 +364,15 @@ async function extractShares(item: Validator, ctx: any): Promise<void> {
         try {
             account = await ctx.store.get(Account, { where: { ownerAddress: item.ownerAddress } });
             ctx.log.info(`Got account - ${account?account.id:'dont have account'}`);
-            ownerNonce = await ctx.eventService.calcNextValidatorOwnerNonce(
+            ownerNonce = await calcNextValidatorOwnerNonce(
+                ctx,
                 item.network,
                 item.ownerAddress,
                 item.addedAtBlockNumber,
                 item.addedAtTransactionIndex,
                 item.addedAtLogIndex,
             );
-            ctx.log.info(`created ownerNonce`);
+            ctx.log.info(`Got ownerNonce ${ownerNonce}`);
             fromSignatureData = {
                 ownerNonce: ownerNonce ?? 0, //need to fix it later
                 publicKey: item.publicKey,
@@ -379,7 +392,7 @@ async function extractShares(item: Validator, ctx: any): Promise<void> {
             if (ownerNonce) {
                 memo += ` Used nonce: ${ownerNonce}.`;
             }
-            memo += ` Signature Data: ${JSON.stringify(fromSignatureData)}.`;
+            memo += ` Signature Data: ${JSON.stringify(fromSignatureData,customReplaceHelper)}.`;
         }
     }
 
@@ -392,7 +405,7 @@ async function extractShares(item: Validator, ctx: any): Promise<void> {
                 message: memo,
                 error: (error as Error).stack || error,
                 data: (error as Error).message,
-                blockNumber: item.addedAtBlockNumber,
+                blockNumber: item.addedAtBlockNumber.toString(),
             })
         ];
         ctx.log.error(`${item.version} ${item.network}: Validator ${item.publicKey} shares validation failed: ${memo}: ${(error as Error).message}`);
@@ -424,7 +437,7 @@ function validateSharesPublicKeys(item: Validator) {
                 message: message,
                 error: (e as Error).stack || e,
                 data: (e as Error).message,
-                blockNumber: item.addedAtBlockNumber,
+                blockNumber: item.addedAtBlockNumber.toString(),
             })
         ];
         console.error(
@@ -446,7 +459,7 @@ function validatePublicKey(item: Validator) {
                 message: message,
                 error: (e as Error).stack || e,
                 data: (e as Error).message,
-                blockNumber: item.addedAtBlockNumber,
+                blockNumber: item.addedAtBlockNumber.toString(),
             })
         ];
         console.error(
@@ -454,25 +467,75 @@ function validatePublicKey(item: Validator) {
         );
     }}
 
+async function calcNextValidatorOwnerNonce(
+    ctx: any,
+    network: string,
+    ownerAddress: string,
+    currentBlockNumber: bigint,
+    currentTransactionIndex: bigint,
+    currentLogIndex: bigint,
+): Promise<number> {
+    // Fetch all relevant events
+    const events: Event[] = await ctx.store.find(Event, {
+        where: {
+            network: network,
+            ownerAddress: ownerAddress.toLowerCase(),
+            event: 'ValidatorAdded',
+        },
+    });
+
+    // Filter events
+    const count = events.filter((event: Event) => {
+        const eventBlockNumber = BigInt(event.blockNumber);
+        const eventTransactionIndex = BigInt(event.transactionIndex);
+        const eventLogIndex = BigInt(event.logIndex);
+
+        if (eventBlockNumber < currentBlockNumber) {
+            return true;
+        } else if (eventBlockNumber === currentBlockNumber) {
+            if (eventTransactionIndex < currentTransactionIndex) {
+                return true;
+            } else if (eventTransactionIndex === currentTransactionIndex) {
+                if (eventLogIndex < currentLogIndex) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }).length;
+
+    return count;
+}
+
 async function handleValidatorRemoved(log: Log, ctx: any): Promise<void> {
-    let { owner,operatorIds, publicKey, cluster} = events.ValidatorRemoved.decode(log);
+    const { owner, operatorIds, publicKey, cluster } = events.ValidatorRemoved.decode(log);
     const id = `${publicKey}-${process.env.NETWORK}-${owner}`;
     ctx.log.info(`Removing validator ${publicKey} owned by ${owner} being registered to cluster with operators: ${operatorIds}`);
-    const deletedItem = {
-        publicKey: publicKey,
-        ownerAddress: owner,
-        network: process.env.NETWORK,
-        updatedAt: BigInt(Date.now()),
-        isDeleted: true,
-    };
+
     const foundValidator = await ctx.store.get(Validator, {
         where: { publicKey: publicKey, network: process.env.NETWORK, ownerAddress: owner },
     });
 
     if (foundValidator) {
-        await ctx.store.upsert([{...foundValidator, ...deletedItem}]);
+        foundValidator.isDeleted = true;
+        foundValidator.updatedAt = BigInt(Date.now());
+
+        await ctx.store.upsert([foundValidator]);
         ctx.log.info(`Validator ${publicKey} has been marked as deleted.`);
     } else {
         ctx.log.info(`Validator ${publicKey} not found for deletion.`);
     }
+}
+
+
+function customReplaceHelper(key: string, value: any) {
+    if (typeof value === 'bigint') {
+        return value.toString();
+    }
+
+    if (typeof value === 'function') {
+        return undefined;
+    }
+
+    return value;
 }

@@ -77,3 +77,18 @@ type Account @entity {
   network: String!
   version: String!
 }
+
+type Event @entity {
+  id: ID!
+  network: String!
+  version: String!
+  logIndex: BigInt!
+  transactionHash: String!
+  transactionIndex: BigInt!
+  event: String!
+  blockNumber: BigInt!
+  ownerAddress: String
+  rawData: String!
+  createdAt: BigInt!
+  processed: BigInt
+}
