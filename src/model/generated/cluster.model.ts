@@ -1,54 +1,53 @@
-import { Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_ } from "typeorm";
-import * as marshal from "./marshal";
+import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_, BigIntColumn as BigIntColumn_, BooleanColumn as BooleanColumn_} from "@subsquid/typeorm-store"
 
 @Entity_()
 export class Cluster {
     constructor(props?: Partial<Cluster>) {
-        Object.assign(this, props);
+        Object.assign(this, props)
     }
 
     @PrimaryColumn_()
-    id!: string;
+    id!: string
 
-    @Column_("text", { nullable: false })
-    clusterId!: string;
+    @StringColumn_({nullable: false})
+    clusterId!: string
 
-    @Column_("text", { nullable: false })
-    network!: string;
+    @StringColumn_({nullable: false})
+    network!: string
 
-    @Column_("text", { nullable: false })
-    version!: string;
+    @StringColumn_({nullable: false})
+    version!: string
 
-    @Column_("text", {nullable: false})
+    @StringColumn_({nullable: false})
     ownerAddress!: string
 
-    @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
-    validatorCount!: bigint;
+    @BigIntColumn_({nullable: false})
+    validatorCount!: bigint
 
-    @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
-    networkFeeIndex!: bigint;
+    @BigIntColumn_({nullable: false})
+    networkFeeIndex!: bigint
 
-    @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
-    index!: bigint;
+    @BigIntColumn_({nullable: false})
+    index!: bigint
 
-    @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
-    balance!: bigint;
+    @BigIntColumn_({nullable: false})
+    balance!: bigint
 
-    @Column_("boolean", { nullable: false })
-    active!: boolean;
+    @BooleanColumn_({nullable: false})
+    active!: boolean
 
-    @Column_("boolean", { nullable: false })
-    isLiquidated!: boolean;
+    @BooleanColumn_({nullable: false})
+    isLiquidated!: boolean
 
-    @Column_("numeric", { array: true, transformer: marshal.bigintArrayTransformer, nullable: false })
-    operators!: bigint[];
+    @StringColumn_({array: true, nullable: false})
+    operators!: (string)[]
 
-    @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
-    blockNumber!: bigint;
+    @BigIntColumn_({nullable: false})
+    blockNumber!: bigint
 
-    @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
-    createdAt!: bigint;
+    @BigIntColumn_({nullable: false})
+    createdAt!: bigint
 
-    @Column_("numeric", { transformer: marshal.bigintTransformer, nullable: false })
-    updatedAt!: bigint;
+    @BigIntColumn_({nullable: false})
+    updatedAt!: bigint
 }

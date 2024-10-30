@@ -9,15 +9,15 @@ import {
 } from '@subsquid/evm-processor'
 import { events } from './abi/ssvabi'
 
-const CONTRACT_ADDRESS = (process.env.CONTRACT_ADDRESS || "0x0d33801785340072C452b994496B19f196b7eE15").toLocaleLowerCase()
-const STARTING_BLOCK = parseInt(process.env.STARTING_BLOCK || "84599")
-const GATEWAY = process.env.GATEWAY || 'https://v2.archive.subsquid.io/network/ethereum-holesky'
+const CONTRACT_ADDRESS = (process.env.CONTRACT_ADDRESS || "").toLocaleLowerCase()
+const STARTING_BLOCK = parseInt(process.env.STARTING_BLOCK || "")
+const GATEWAY = process.env.GATEWAY || ''
 
 export const processor = new EvmBatchProcessor()
     .setGateway(GATEWAY)
     .setRpcEndpoint({
         url: assertNotNull(process.env.RPC_ETH_HTTP, 'No RPC endpoint supplied'),
-        rateLimit: 10
+        rateLimit: 10000
     })
     .setFinalityConfirmation(75)
     .setFields({

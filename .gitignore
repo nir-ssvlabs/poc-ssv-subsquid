@@ -3,5 +3,4 @@
 
 # IDE files
 /.idea
-/.env
 /package-lock.json

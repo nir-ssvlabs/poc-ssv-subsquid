@@ -4,12 +4,12 @@ type Validator @entity {
   version: String!
   ownerAddress: String!
   publicKey: String!
-  operators: [BigInt!]!
+  operators: [String!]!
   cluster: String!
   shares: String!
   sharesPublicKeys: [String!]!
   encryptedKeys: [String!]!
-  memo: [String!]!
+  memo: [String]
   blockNumber: BigInt!
   logIndex: BigInt!
   transactionIndex: BigInt!
@@ -40,7 +40,7 @@ type Operator @entity {
   previousFee: BigInt!
   declaredFee: BigInt!
   addressWhitelist: String
-  memo: [String!]!
+  memo: [String]
   blockNumber: BigInt!
   isValid: Boolean!
   isDeleted: Boolean!
@@ -63,7 +63,7 @@ type Cluster @entity {
   balance: BigInt!
   active: Boolean!
   isLiquidated: Boolean!
-  operators: [BigInt!]!
+  operators: [String!]!
   blockNumber: BigInt!
   createdAt: BigInt!
   updatedAt: BigInt!

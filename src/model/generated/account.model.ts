@@ -1,23 +1,23 @@
-import { Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_ } from "typeorm";
+import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_} from "@subsquid/typeorm-store"
 
 @Entity_()
 export class Account {
     constructor(props?: Partial<Account>) {
-        Object.assign(this, props);
+        Object.assign(this, props)
     }
 
     @PrimaryColumn_()
-    id!: string;
+    id!: string
 
-    @Column_("text", { nullable: false })
-    ownerAddress!: string;
+    @StringColumn_({nullable: false})
+    ownerAddress!: string
 
-    @Column_("text", { nullable: true })
-    recipientAddress?: string | null;
+    @StringColumn_({nullable: true})
+    recipientAddress!: string | undefined | null
 
-    @Column_("text", { nullable: false })
-    network!: string;
+    @StringColumn_({nullable: false})
+    network!: string
 
-    @Column_("text", { nullable: false })
-    version!: string;
+    @StringColumn_({nullable: false})
+    version!: string
 }
