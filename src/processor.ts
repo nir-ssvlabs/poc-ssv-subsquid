@@ -39,6 +39,16 @@ export const processor = new EvmBatchProcessor()
             events.OperatorFeeDeclared.topic,
             events.OperatorFeeExecuted.topic,
             events.OperatorRemoved.topic,
+            events.ClusterLiquidated.topic,
+            events.ClusterReactivated.topic,
+            events.ClusterDeposited.topic,
+            events.ClusterWithdrawn.topic,
+            events.FeeRecipientAddressUpdated.topic,
+            events.OperatorPrivacyStatusUpdated.topic,
+            events.OperatorMultipleWhitelistUpdated.topic,
+            events.OperatorMultipleWhitelistRemoved.topic,
+            events.OperatorWhitelistUpdated.topic,
+            events.OperatorWhitelistingContractUpdated.topic,
         ],
     });
 

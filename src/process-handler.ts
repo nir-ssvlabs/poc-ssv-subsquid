@@ -20,12 +20,25 @@ export const eventHandlerMap: EventHandlerMap = {
     OperatorRemoved: handleOperatorRemoved,
     ValidatorAdded: handleValidatorAdded,
     ValidatorRemoved: handleValidatorRemoved,
+    ClusterLiquidated: handleClusterLiquidated,
+    ClusterReactivated: handleClusterReactivated,
+    ClusterDeposited: handleClusterDeposited,
+    ClusterWithdrawn: handleClusterWithdrawn,
+    FeeRecipientAddressUpdated: handleFeeRecipientAddressUpdated,
+    OperatorPrivacyStatusUpdated: handleOperatorPrivacyStatusUpdated,
+    OperatorMultipleWhitelistUpdated: handleOperatorMultipleWhitelistUpdated,
+    OperatorMultipleWhitelistRemoved: handleOperatorMultipleWhitelistRemoved,
+    OperatorWhitelistUpdated: handleOperatorWhitelistUpdated,
+    OperatorWhitelistingContractUpdated: handleOperatorWhitelistingContractUpdated
+
 };
 
 async function handleOperatorAdded(log: Log, ctx: any): Promise<void>  {
     let { operatorId, owner,publicKey, fee } = events.OperatorAdded.decode(log);
+    const types = ["uint256", "address", "bool"]; // Parameter types
     const id = `${operatorId}-${process.env.NETWORK}`
     owner = ethers.utils.getAddress(owner);
+    const decodedPublicKey = ethers.utils.defaultAbiCoder.decode(types, publicKey);
     ctx.log.info(`Adding operator ${operatorId} owned by ${owner} being registered with fee: ${fee}`);
 
     let operator = await ctx.store.get(Operator, { where: { id: id } });
@@ -44,7 +57,7 @@ async function handleOperatorAdded(log: Log, ctx: any): Promise<void>  {
     operator.network = process.env.NETWORK!;
     operator.version = process.env.VERSION;
     operator.ownerAddress = owner;
-    operator.publicKey = publicKey;
+    operator.publicKey = decodedPublicKey;
     operator.fee = BigInt(fee);
     operator.previousFee = BigInt(fee);
     operator.declaredFee = BigInt(fee);
@@ -188,7 +201,7 @@ async function handleValidatorAdded(log: Log, ctx: any): Promise<void> {
     validator.updatedAt = BigInt(Date.now());
 
     await validateOperators(validator, ctx);
-    validator = await beforeValidatorProcess(validator, ctx, cluster.index);
+    validator = await beforeValidatorProcess(validator, ctx, cluster);
     await processValidator(validator, ctx);
 
     ctx.log.info(`validator ${publicKey} with operators ${validator.operators} and cluster ${validator.cluster} successfully added!`);
@@ -243,9 +256,15 @@ async function validateOperators(item: Validator, ctx: any):Promise<void> {
     }
 }
 
-async function beforeValidatorProcess(item: Validator, ctx: any, clusterIndex :bigint): Promise<Validator> {
+async function beforeValidatorProcess(item: Validator, ctx: any,cluster: {
+    readonly validatorCount: number;
+    readonly networkFeeIndex: bigint;
+    readonly index: bigint;
+    readonly active: boolean;
+    readonly balance: bigint;
+} ): Promise<Validator> {
     await ensureAccount(item, ctx);
-    await ensureValidatorCluster(item, ctx, clusterIndex);
+    await ensureValidatorCluster(item, ctx, cluster);
     return item;
 }
 
@@ -261,36 +280,46 @@ async function ensureAccount(item: Validator, ctx: any): Promise<void> {
     const existingAccount = await ctx.store.get(Account, { where: { id: account.id } });
     if (!existingAccount) {
         await ctx.store.upsert([account]);
-        ctx.log.info(`Adding new account ${account.id}`);
+        ctx.log.info(`Adding/updating Account ${account.id}`);
     }
 }
 
-async function ensureValidatorCluster(item: Validator, ctx: any, clusterIndex: bigint): Promise<void> {
-    const existingCluster = await ctx.store.get(Cluster, { where: { clusterId: item.cluster } });
+async function ensureValidatorCluster(item: Validator, ctx: any,   clusterEvent: {
+    readonly validatorCount: number;
+    readonly networkFeeIndex: bigint;
+    readonly index: bigint;
+    readonly active: boolean;
+    readonly balance: bigint;
+}): Promise<void> {
+    let cluster = await ctx.store.get(Cluster, { where: { clusterId: item.cluster } });
     const operators: string[] = item.operators.map(op => BigInt(op).toString()); // Convert to string
 
-    if (!existingCluster) {
-        const cluster = new Cluster({
-            id: clusterIndex.toString(),
-            clusterId: item.cluster,
-            network: item.network,
-            version: process.env.VERSION!,
-            ownerAddress: item.ownerAddress,
-            validatorCount: BigInt(0),
-            networkFeeIndex: BigInt(0),
-            index: BigInt(0),
-            balance: BigInt(0),
-            active: true,
-            isLiquidated: false,
-            operators: operators,
-            blockNumber: item.blockNumber,
-            createdAt: item.createdAt,
-            updatedAt: item.updatedAt,
-        });
+    const isUpdating = !!cluster; //!!null or !!undefined becomes false
 
-        await ctx.store.upsert([cluster]);
-        ctx.log.info(`Adding new cluster ${cluster.clusterId}`);
+    if (isUpdating) {
+        ctx.log.info(`Cluster ${cluster.clusterId} already exists. Updating attributes`);
+    } else {
+        const uniqueId = `${item.cluster}-${process.env.NETWORK}`;
+        cluster = new Cluster();
+        cluster.id = uniqueId;
+        cluster.clusterId = item.cluster;
+        cluster.createdAt = BigInt(Date.now()).toString();
     }
+    cluster.network = item.network;
+    cluster.version = item.version;
+    cluster.ownerAddress = item.ownerAddress;
+    cluster.validatorCount = clusterEvent.validatorCount.toString();
+    cluster.networkFeeIndex = clusterEvent.networkFeeIndex.toString();
+    cluster.index = clusterEvent.index.toString();
+    cluster.balance = clusterEvent.balance.toString();
+    cluster.active = clusterEvent.active;
+    cluster.isLiquidated = false;
+    cluster.operators = operators;
+    cluster.blockNumber = item.blockNumber.toString();
+    cluster.updatedAt = BigInt(Date.now()).toString();
+
+    await ctx.store.upsert([cluster]);
+    ctx.log.info(`cluster ${cluster.clusterId} successfully added!`);
 }
 
 async function processValidator(item: Validator, ctx: any): Promise<void> {
@@ -518,11 +547,12 @@ async function handleValidatorRemoved(log: Log, ctx: any): Promise<void> {
     const id = `${publicKey}-${process.env.NETWORK}-${owner}`;
     ctx.log.info(`Removing validator ${publicKey} owned by ${owner} being registered to cluster with operators: ${operatorIds}`);
 
-    const foundValidator = await ctx.store.get(Validator, {
+    let foundValidator = await ctx.store.get(Validator, {
         where: { publicKey: publicKey, network: process.env.NETWORK, ownerAddress: owner },
     });
 
     if (foundValidator) {
+        await ensureValidatorCluster(foundValidator, ctx, cluster);
         foundValidator.isDeleted = true;
         foundValidator.updatedAt = BigInt(Date.now());
 
@@ -544,4 +574,282 @@ function customReplaceHelper(key: string, value: any) {
     }
 
     return value;
+}
+
+async function handleClusterLiquidated(log: Log, ctx: any): Promise<void>{
+    let { owner, operatorIds, cluster } = events.ClusterLiquidated.decode(log);
+    owner = ethers.utils.getAddress(owner);
+    let operators = operatorIds.map(id => BigInt(id));
+    let clusterId = generateClusterId(owner, operatorIds);
+    let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
+    const isUpdating = !!clusterData; //!!null or !!undefined becomes false
+
+    if (isUpdating) {
+        ctx.log.info(`Cluster ${clusterData.clusterId} already exists. Updating attributes`);
+    } else {
+        const uniqueId = `${clusterId}-${process.env.NETWORK}`;
+        clusterData = new Cluster();
+        clusterData.id = uniqueId;
+        clusterData.clusterId = clusterId;
+        clusterData.createdAt = BigInt(Date.now()).toString();
+    }
+    ctx.log.info(`Cluster${clusterData.clusterId} is Liquidated - Updating attributes`);
+    clusterData.network = process.env.NETWORK;
+    clusterData.version = process.env.VERSION;
+    clusterData.ownerAddress = owner;
+    clusterData.validatorCount = cluster.validatorCount.toString();
+    clusterData.networkFeeIndex = cluster.networkFeeIndex.toString();
+    clusterData.index = cluster.index.toString();
+    clusterData.balance = cluster.balance.toString();
+    clusterData.active = cluster.active;
+    clusterData.isLiquidated = true;
+    clusterData.operators = operators;
+    clusterData.blockNumber = BigInt(log.block.height).toString();
+    clusterData.updatedAt = BigInt(Date.now()).toString();
+    await setIsLiquidatedValidators({ clusterId: clusterData.clusterId, network: clusterData.network, ownerAddress: clusterData.owner },
+        true, ctx);
+    await ctx.store.upsert([clusterData]);
+    ctx.log.info(`cluster ${clusterData.clusterId} successfully added/updated`);
+
+}
+
+async function setIsLiquidatedValidators(
+    where: { clusterId: string; network: string; ownerAddress: string },
+    isLiquidated: boolean, ctx: any
+): Promise<void> {
+    ctx.log.info(`set Liquidated for Validators with clusterId ${where.clusterId}`);
+    let validators = await ctx.store.find(Validator, {
+        where: {
+            network: where.network,
+            ownerAddress: where.ownerAddress,
+            cluster: where.clusterId
+        }
+    });
+    if(validators){
+        for (let validator of validators) {
+            validator.isLiquidated = isLiquidated;
+            validator.updatedAt = BigInt(Date.now()).toString();
+            ctx.log.info(`Updated Validator ${validator.id} isLiquidated`);
+        }
+        await ctx.store.upsert(validators);
+        ctx.log.info(`Successfully updated Validators in the isLiquidated function`);
+    }else {
+        ctx.log.error("Invalid validators response:", validators);
+    }
+}
+
+async function handleClusterReactivated(log: Log, ctx: any): Promise<void>{
+    let { owner, operatorIds, cluster } = events.ClusterReactivated.decode(log);
+    owner = ethers.utils.getAddress(owner);
+    let operators = operatorIds.map(id => BigInt(id));
+    let clusterId = generateClusterId(owner, operatorIds);
+    let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
+    const isUpdating = !!clusterData; //!!null or !!undefined becomes false
+
+    if (isUpdating) {
+        ctx.log.info(`Cluster ${clusterData.clusterId} already exists. Updating attributes`);
+    } else {
+        const uniqueId = `${clusterId}-${process.env.NETWORK}`;
+        clusterData = new Cluster();
+        clusterData.id = uniqueId;
+        clusterData.clusterId = clusterId;
+        clusterData.createdAt = BigInt(Date.now()).toString();
+    }
+    ctx.log.info(`Cluster${clusterData.clusterId} is reset Liquidation Status - Updating attributes`);
+    clusterData.network = process.env.NETWORK;
+    clusterData.version = process.env.VERSION;
+    clusterData.ownerAddress = owner;
+    clusterData.validatorCount = cluster.validatorCount.toString();
+    clusterData.networkFeeIndex = cluster.networkFeeIndex.toString();
+    clusterData.index = cluster.index.toString();
+    clusterData.balance = cluster.balance.toString();
+    clusterData.active = cluster.active;
+    clusterData.isLiquidated = false;
+    clusterData.operators = operators;
+    clusterData.blockNumber = BigInt(log.block.height).toString();
+    clusterData.updatedAt = BigInt(Date.now()).toString();
+    await setIsLiquidatedValidators({ clusterId: clusterData.clusterId, network: clusterData.network, ownerAddress: clusterData.owner },
+        false, ctx);
+    await ctx.store.upsert([clusterData]);
+    ctx.log.info(`cluster ${clusterData.clusterId} successfully added/updated`);
+}
+
+async function handleClusterDeposited(log: Log, ctx: any): Promise<void>{
+    let { owner, operatorIds, cluster } = events.ClusterDeposited.decode(log);
+    owner = ethers.utils.getAddress(owner);
+    let operators = operatorIds.map(id => BigInt(id).toString());
+    let clusterId = generateClusterId(owner, operatorIds);
+    let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
+    ctx.log.info(`Cluster${clusterData.clusterId} is Deposited - Updating attributes`);
+    clusterData.network = process.env.NETWORK;
+    clusterData.version = process.env.VERSION;
+    clusterData.ownerAddress = owner;
+    clusterData.validatorCount = cluster.validatorCount.toString();
+    clusterData.networkFeeIndex = cluster.networkFeeIndex.toString();
+    clusterData.index = cluster.index.toString();
+    clusterData.balance = cluster.balance.toString();
+    clusterData.active = cluster.active;
+    clusterData.operators = operators;
+    clusterData.blockNumber = BigInt(log.block.height).toString();
+    clusterData.updatedAt = BigInt(Date.now()).toString();
+    await ctx.store.upsert([clusterData]);
+    ctx.log.info(`cluster ${clusterData.clusterId} successfully added/updated`);
+}
+
+async function handleClusterWithdrawn(log: Log, ctx: any): Promise<void>{
+    let { owner, operatorIds, cluster } = events.ClusterWithdrawn.decode(log);
+    owner = ethers.utils.getAddress(owner);
+    let operators = operatorIds.map(id => BigInt(id).toString());
+    let clusterId = generateClusterId(owner, operatorIds);
+    let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
+    ctx.log.info(`Cluster${clusterData.clusterId} is Withdrawn - Updating attributes`);
+    clusterData.network = process.env.NETWORK;
+    clusterData.version = process.env.VERSION;
+    clusterData.ownerAddress = owner;
+    clusterData.validatorCount = cluster.validatorCount.toString();
+    clusterData.networkFeeIndex = cluster.networkFeeIndex.toString();
+    clusterData.index = cluster.index.toString();
+    clusterData.balance = cluster.balance.toString();
+    clusterData.active = cluster.active;
+    clusterData.isLiquidated = cluster.active;
+    clusterData.operators = operators;
+    clusterData.blockNumber = BigInt(log.block.height).toString();
+    clusterData.updatedAt = BigInt(Date.now()).toString();
+    await ctx.store.upsert([clusterData]);
+    ctx.log.info(`cluster ${clusterData.clusterId} successfully added/updated`);
+}
+
+async function handleFeeRecipientAddressUpdated(log: Log, ctx: any): Promise<void>{
+    let { owner,recipientAddress } = events.FeeRecipientAddressUpdated.decode(log);
+    owner = ethers.utils.getAddress(owner);
+    const id =  `${owner}-${process.env.NETWORK}`;
+    let account = await ctx.store.get(Account, { where: { id: id } });
+    const isUpdating = !!account; //!!null or !!undefined becomes false
+
+    if (isUpdating) {
+        ctx.log.info(`Account ${account.id} already exists. Updating attributes`);
+    } else {
+       account = new Account({
+            id: id,
+            ownerAddress: owner,
+            network: process.env.NETWORK,
+            version: process.env.VERSION,
+        });
+    }
+    account.recipientAddress = recipientAddress;
+    await ctx.store.upsert([account]);
+    ctx.log.info(`Adding/updating Account ${account.id}`);
+}
+
+async function handleOperatorPrivacyStatusUpdated(log: Log, ctx: any): Promise<void> {
+    let { operatorIds, toPrivate } = events.OperatorPrivacyStatusUpdated.decode(log);
+    ctx.log.info(`Updating privacy status for operators: ${operatorIds}, setting isPrivate to ${toPrivate}`);
+    const operatorIdsBigInt = operatorIds.map(id => BigInt(id));
+
+    const operators = await ctx.store.find(Operator, {
+        where: {
+            operatorId: In(operatorIdsBigInt),
+            network: process.env.NETWORK,
+        },
+    });
+
+    operators.forEach((operator: Operator) => {
+        operator.isPrivate = toPrivate;
+    });
+
+    await ctx.store.upsert(operators);
+
+    ctx.log.info(`Privacy status updated for operators: ${operatorIds}`);
+}
+
+async function handleOperatorMultipleWhitelistUpdated(log: Log, ctx: any): Promise<void> {
+    let { operatorIds, whitelistAddresses } = events.OperatorMultipleWhitelistUpdated.decode(log);
+    ctx.log.info(`Adding Whitelist addresses for operators: ${operatorIds}`);
+    const newAddresses = whitelistAddresses.map((address: string) => ethers.utils.getAddress(address));
+    const operatorsToUpdate = [];
+    for (const operatorId of operatorIds) {
+        const id = `${operatorId}-${process.env.NETWORK}`
+        const operator = await ctx.store.get(Operator, {
+            where: { id: id, network: process.env.NETWORK },
+        });
+
+        if (operator) {
+            newAddresses.forEach((address) => {
+                if (!operator.whitelistAddresses.includes(address)) {
+                    ctx.log.info(`Whitelist addresses updated for operator ${operator.operatorId}.`);
+                    operator.whitelistAddresses.push(address);
+                }
+            });
+
+            // Add the updated operator to the list to be saved later
+            operatorsToUpdate.push(operator);
+        } else {
+            ctx.log.error(`Operator with ID ${id} not found.`);
+        }
+    }
+    await ctx.store.upsert(operatorsToUpdate);
+    ctx.log.info(`Whitelist addresses updated for ${operatorsToUpdate.length} operators.`);
+}
+
+async function handleOperatorMultipleWhitelistRemoved(log: Log, ctx: any): Promise<void>{
+    let { operatorIds, whitelistAddresses } = events.OperatorMultipleWhitelistRemoved.decode(log);
+    ctx.log.info(`Removing Whitelist addresses for operators: ${operatorIds}`);
+    const addressesToRemove = whitelistAddresses.map((address: string) => ethers.utils.getAddress(address));
+    const operatorsToUpdate = [];
+    for (const operatorId of operatorIds) {
+        const id = `${operatorId}-${process.env.NETWORK}`
+        const operator = await ctx.store.get(Operator, {
+            where: { id: id, network: process.env.NETWORK },
+        });
+
+        if (operator) {
+            // Filter out addresses that need to be removed from whitelistAddresses
+            operator.whitelistAddresses = operator.whitelistAddresses.filter((address: string) => !addressesToRemove.includes(address));
+            ctx.log.info(`Whitelist addresses removed for operator ${operator.operatorId}.`);
+            operatorsToUpdate.push(operator);
+        } else {
+            ctx.log.warn(`Operator with ID ${id} not found.`);
+        }
+    }
+    await ctx.store.upsert(operatorsToUpdate);
+    ctx.log.info(`Whitelist addresses removed for ${operatorsToUpdate.length} operators.`);
+}
+
+
+async function handleOperatorWhitelistUpdated(log: Log, ctx: any): Promise<void>{
+    let { operatorId, whitelisted } = events.OperatorWhitelistUpdated.decode(log);
+    ctx.log.info(`Adding Whitelist addresses for operator: ${operatorId}`);
+    const isPrivate = whitelisted !== '0x0000000000000000000000000000000000000000';
+    const whitelistAddresses: string[] = isPrivate ? [ethers.utils.getAddress(whitelisted)] : [];
+    const id = `${operatorId}-${process.env.NETWORK}`
+    const operator = await ctx.store.get(Operator, { where: { id: id, network: process.env.NETWORK } });
+    if (operator) {
+        operator.addressWhitelist = whitelisted;
+        operator.whitelistAddresses = whitelistAddresses;
+        operator.isPrivate = isPrivate;
+        operator.blockNumber = BigInt(log.block.height).toString();
+
+        // Save the updated operator
+        await ctx.store.upsert([operator]);
+        ctx.log.info(`Whitelist for operator ${operatorId} updated successfully.`);
+    } else {
+        ctx.log.warn(`Operator with ID ${operatorId} not found.`);
+    }
+}
+
+async function handleOperatorWhitelistingContractUpdated(log: Log, ctx: any): Promise<void>{
+    const { operatorIds, whitelistingContract } = events.OperatorWhitelistingContractUpdated.decode(log);
+    ctx.log.info(`Updating whitelisting contract for operators ${operatorIds} on network ${process.env.NETWORK}.`);
+    const operatorIdsBigInt = operatorIds.map(id => BigInt(id));
+    const operators = await ctx.store.find(Operator, {   where: {operatorId: In(operatorIdsBigInt), network: process.env.NETWORK,}});
+    if (operators.length > 0) {
+        operators.forEach((operator: Operator) => {
+            operator.whitelistingContract = whitelistingContract;
+        });
+
+        await ctx.store.upsert(operators);
+        ctx.log.info(`Whitelisting contract updated for ${operators.length} operators.`);
+    } else {
+        ctx.log.warn(`No operators found for IDs: ${operatorIds}`);
+    }
 }
