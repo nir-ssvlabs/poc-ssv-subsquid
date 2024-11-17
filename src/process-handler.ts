@@ -5,6 +5,7 @@ import {Log} from "./processor";
 import {In} from 'typeorm';
 import {KeyShares} from 'ssv-keys';
 import bls from 'bls-eth-wasm';
+import {EnumEvents} from './enums/enum-evets'
 
 
 
@@ -35,11 +36,40 @@ export const eventHandlerMap: EventHandlerMap = {
 
 async function handleOperatorAdded(log: Log, ctx: any): Promise<void>  {
     let { operatorId, owner,publicKey, fee } = events.OperatorAdded.decode(log);
-    const types = ["uint256", "address", "bool"]; // Parameter types
     const id = `${operatorId}-${process.env.NETWORK}`
     owner = ethers.utils.getAddress(owner);
-    const decodedPublicKey = ethers.utils.defaultAbiCoder.decode(types, publicKey);
+    let publicKeyUtf8 = "";
+    try {
+        const decodedPublicKey = ethers.utils.defaultAbiCoder.decode(['bytes'], publicKey)[0];
+        publicKeyUtf8 = ethers.utils.toUtf8String(decodedPublicKey);
+    } catch {
+        try {
+            publicKeyUtf8 = publicKey;
+            ctx.log.info(`Public key is already in UTF-8 format: ${publicKeyUtf8}`);
+        } catch (error) {
+            ctx.log.error(`Error decoding public key: ${(error as Error).message}`);
+        }
+    }
     ctx.log.info(`Adding operator ${operatorId} owned by ${owner} being registered with fee: ${fee}`);
+
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_ADDED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorAdded`);
 
     let operator = await ctx.store.get(Operator, { where: { id: id } });
 
@@ -57,10 +87,10 @@ async function handleOperatorAdded(log: Log, ctx: any): Promise<void>  {
     operator.network = process.env.NETWORK!;
     operator.version = process.env.VERSION;
     operator.ownerAddress = owner;
-    operator.publicKey = decodedPublicKey;
+    operator.publicKey = publicKeyUtf8;
     operator.fee = BigInt(fee);
-    operator.previousFee = BigInt(fee);
-    operator.declaredFee = BigInt(fee);
+    operator.previousFee = BigInt(0);
+    operator.declaredFee = BigInt(0);
     operator.addressWhitelist = '';
     operator.memo = null;
     operator.blockNumber = BigInt(log.block.height);
@@ -83,6 +113,25 @@ async function handleOperatorAdded(log: Log, ctx: any): Promise<void>  {
 
 async function handleOperatorRemoved(log: Log, ctx: any): Promise<void> {
     let { operatorId } = events.OperatorRemoved.decode(log);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_REMOVED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: null,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorRemoved`);
+
     const id = `${operatorId}-${process.env.NETWORK}`
 
     const existingOperator = await ctx.store.get(Operator, {
@@ -95,6 +144,7 @@ async function handleOperatorRemoved(log: Log, ctx: any): Promise<void> {
     }
 
     existingOperator.isDeleted = true;
+    existingOperator.blockNumber = BigInt(log.block.height);
     existingOperator.updatedAt = BigInt(Date.now());
     await ctx.store.upsert([existingOperator]);
     ctx.log.info(`operator ${operatorId} successfully removed!`);
@@ -103,6 +153,25 @@ async function handleOperatorRemoved(log: Log, ctx: any): Promise<void> {
 async function handleOperatorFeeDeclared(log: Log, ctx: any): Promise<void> {
     let { owner, operatorId, blockNumber,  fee } = events.OperatorFeeDeclared.decode(log);
     owner = ethers.utils.getAddress(owner);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_FEE_DECLARATION,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorFeeDeclared`);
+
     const id = `${operatorId}-${process.env.NETWORK}`
     const existingOperator = await ctx.store.get(Operator, {
         where: { id: id },
@@ -113,6 +182,7 @@ async function handleOperatorFeeDeclared(log: Log, ctx: any): Promise<void> {
         return;
     }
     existingOperator.declaredFee = fee;
+    existingOperator.blockNumber = BigInt(log.block.height);
     existingOperator.updatedAt = BigInt(Date.now());
     await ctx.store.upsert([existingOperator]);
     ctx.log.info(`Declaring fees for Operator ${operatorId} owned by ${owner} with fee: ${fee}`);
@@ -122,6 +192,25 @@ async function handleOperatorFeeDeclared(log: Log, ctx: any): Promise<void> {
 async function handleOperatorFeeExecuted(log: Log, ctx: any): Promise<void> {
     let { owner, operatorId, blockNumber,  fee } = events.OperatorFeeExecuted.decode(log);
     owner = ethers.utils.getAddress(owner);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_FEE_EXECUTION,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorFeeExecuted`);
+
     const id = `${operatorId}-${process.env.NETWORK}`
 
     const existingOperator = await ctx.store.get(Operator, {
@@ -135,6 +224,7 @@ async function handleOperatorFeeExecuted(log: Log, ctx: any): Promise<void> {
     existingOperator.previousFee = existingOperator.fee;
     existingOperator.fee = fee;
     existingOperator.declaredFee = BigInt(0);
+    existingOperator.blockNumber = BigInt(log.block.height);
     existingOperator.updatedAt = BigInt(Date.now());
     await ctx.store.upsert([existingOperator]);
     ctx.log.info(`Fee execution for Operator ${operatorId} owned by ${owner} with fee: ${fee}`);
@@ -155,7 +245,7 @@ async function handleValidatorAdded(log: Log, ctx: any): Promise<void> {
         logIndex: BigInt(log.logIndex),
         transactionHash: log.block.hash,
         transactionIndex: BigInt(log.transactionIndex),
-        event: 'ValidatorAdded',
+        event: EnumEvents.EVENT_VALIDATOR_ADDED,
         blockNumber: BigInt(log.block.height),
         ownerAddress: owner,
         rawData: rawDataString,
@@ -547,6 +637,25 @@ async function handleValidatorRemoved(log: Log, ctx: any): Promise<void> {
     const id = `${publicKey}-${process.env.NETWORK}-${owner}`;
     ctx.log.info(`Removing validator ${publicKey} owned by ${owner} being registered to cluster with operators: ${operatorIds}`);
 
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_VALIDATOR_REMOVED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event ValidatorRemoved`);
+
     let foundValidator = await ctx.store.get(Validator, {
         where: { publicKey: publicKey, network: process.env.NETWORK, ownerAddress: owner },
     });
@@ -554,6 +663,7 @@ async function handleValidatorRemoved(log: Log, ctx: any): Promise<void> {
     if (foundValidator) {
         await ensureValidatorCluster(foundValidator, ctx, cluster);
         foundValidator.isDeleted = true;
+        foundValidator.blockNumber = BigInt(log.block.height);
         foundValidator.updatedAt = BigInt(Date.now());
 
         await ctx.store.upsert([foundValidator]);
@@ -579,6 +689,25 @@ function customReplaceHelper(key: string, value: any) {
 async function handleClusterLiquidated(log: Log, ctx: any): Promise<void>{
     let { owner, operatorIds, cluster } = events.ClusterLiquidated.decode(log);
     owner = ethers.utils.getAddress(owner);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_CLUSTER_LIQUIDATED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event ClusterLiquidated`);
+
     let operators = operatorIds.map(id => BigInt(id));
     let clusterId = generateClusterId(owner, operatorIds);
     let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
@@ -641,6 +770,25 @@ async function setIsLiquidatedValidators(
 async function handleClusterReactivated(log: Log, ctx: any): Promise<void>{
     let { owner, operatorIds, cluster } = events.ClusterReactivated.decode(log);
     owner = ethers.utils.getAddress(owner);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_CLUSTER_REACTIVATED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event ClusterReactivated`);
+
     let operators = operatorIds.map(id => BigInt(id));
     let clusterId = generateClusterId(owner, operatorIds);
     let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
@@ -677,6 +825,25 @@ async function handleClusterReactivated(log: Log, ctx: any): Promise<void>{
 async function handleClusterDeposited(log: Log, ctx: any): Promise<void>{
     let { owner, operatorIds, cluster } = events.ClusterDeposited.decode(log);
     owner = ethers.utils.getAddress(owner);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_CLUSTER_DEPOSITED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event ClusterDeposited`);
+
     let operators = operatorIds.map(id => BigInt(id).toString());
     let clusterId = generateClusterId(owner, operatorIds);
     let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
@@ -699,6 +866,25 @@ async function handleClusterDeposited(log: Log, ctx: any): Promise<void>{
 async function handleClusterWithdrawn(log: Log, ctx: any): Promise<void>{
     let { owner, operatorIds, cluster } = events.ClusterWithdrawn.decode(log);
     owner = ethers.utils.getAddress(owner);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_CLUSTER_WITHDRAWN,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event ClusterWithdrawn`);
+
     let operators = operatorIds.map(id => BigInt(id).toString());
     let clusterId = generateClusterId(owner, operatorIds);
     let clusterData = await ctx.store.get(Cluster, { where: { clusterId: clusterId} });
@@ -722,6 +908,25 @@ async function handleClusterWithdrawn(log: Log, ctx: any): Promise<void>{
 async function handleFeeRecipientAddressUpdated(log: Log, ctx: any): Promise<void>{
     let { owner,recipientAddress } = events.FeeRecipientAddressUpdated.decode(log);
     owner = ethers.utils.getAddress(owner);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_ACCOUNT_FEE_RECIPIENT_ADD,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: owner,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event FeeRecipientAddressUpdated`);
+
     const id =  `${owner}-${process.env.NETWORK}`;
     let account = await ctx.store.get(Account, { where: { id: id } });
     const isUpdating = !!account; //!!null or !!undefined becomes false
@@ -744,6 +949,25 @@ async function handleFeeRecipientAddressUpdated(log: Log, ctx: any): Promise<voi
 async function handleOperatorPrivacyStatusUpdated(log: Log, ctx: any): Promise<void> {
     let { operatorIds, toPrivate } = events.OperatorPrivacyStatusUpdated.decode(log);
     ctx.log.info(`Updating privacy status for operators: ${operatorIds}, setting isPrivate to ${toPrivate}`);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_STATUS_PRIVACY_STATUS_UPDATED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: null,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorPrivacyStatusUpdated`);
+
     const operatorIdsBigInt = operatorIds.map(id => BigInt(id));
 
     const operators = await ctx.store.find(Operator, {
@@ -755,6 +979,7 @@ async function handleOperatorPrivacyStatusUpdated(log: Log, ctx: any): Promise<v
 
     operators.forEach((operator: Operator) => {
         operator.isPrivate = toPrivate;
+        operator.blockNumber = BigInt(log.block.height);
     });
 
     await ctx.store.upsert(operators);
@@ -765,6 +990,24 @@ async function handleOperatorPrivacyStatusUpdated(log: Log, ctx: any): Promise<v
 async function handleOperatorMultipleWhitelistUpdated(log: Log, ctx: any): Promise<void> {
     let { operatorIds, whitelistAddresses } = events.OperatorMultipleWhitelistUpdated.decode(log);
     ctx.log.info(`Adding Whitelist addresses for operators: ${operatorIds}`);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_MULTIPLE_WHITELIST_UPDATED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: null,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorMultipleWhitelistUpdated`);
     const newAddresses = whitelistAddresses.map((address: string) => ethers.utils.getAddress(address));
     const operatorsToUpdate = [];
     for (const operatorId of operatorIds) {
@@ -778,6 +1021,7 @@ async function handleOperatorMultipleWhitelistUpdated(log: Log, ctx: any): Promi
                 if (!operator.whitelistAddresses.includes(address)) {
                     ctx.log.info(`Whitelist addresses updated for operator ${operator.operatorId}.`);
                     operator.whitelistAddresses.push(address);
+                    operator.blockNumber = BigInt(log.block.height);
                 }
             });
 
@@ -794,6 +1038,24 @@ async function handleOperatorMultipleWhitelistUpdated(log: Log, ctx: any): Promi
 async function handleOperatorMultipleWhitelistRemoved(log: Log, ctx: any): Promise<void>{
     let { operatorIds, whitelistAddresses } = events.OperatorMultipleWhitelistRemoved.decode(log);
     ctx.log.info(`Removing Whitelist addresses for operators: ${operatorIds}`);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_MULTIPLE_WHITELIST_REMOVED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: null,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorMultipleWhitelistRemoved`);
     const addressesToRemove = whitelistAddresses.map((address: string) => ethers.utils.getAddress(address));
     const operatorsToUpdate = [];
     for (const operatorId of operatorIds) {
@@ -805,6 +1067,7 @@ async function handleOperatorMultipleWhitelistRemoved(log: Log, ctx: any): Promi
         if (operator) {
             // Filter out addresses that need to be removed from whitelistAddresses
             operator.whitelistAddresses = operator.whitelistAddresses.filter((address: string) => !addressesToRemove.includes(address));
+            operator.blockNumber = BigInt(log.block.height);
             ctx.log.info(`Whitelist addresses removed for operator ${operator.operatorId}.`);
             operatorsToUpdate.push(operator);
         } else {
@@ -819,6 +1082,25 @@ async function handleOperatorMultipleWhitelistRemoved(log: Log, ctx: any): Promi
 async function handleOperatorWhitelistUpdated(log: Log, ctx: any): Promise<void>{
     let { operatorId, whitelisted } = events.OperatorWhitelistUpdated.decode(log);
     ctx.log.info(`Adding Whitelist addresses for operator: ${operatorId}`);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_WHITELIST_UPDATED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: null,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorWhitelistUpdated`);
+
     const isPrivate = whitelisted !== '0x0000000000000000000000000000000000000000';
     const whitelistAddresses: string[] = isPrivate ? [ethers.utils.getAddress(whitelisted)] : [];
     const id = `${operatorId}-${process.env.NETWORK}`
@@ -840,11 +1122,30 @@ async function handleOperatorWhitelistUpdated(log: Log, ctx: any): Promise<void>
 async function handleOperatorWhitelistingContractUpdated(log: Log, ctx: any): Promise<void>{
     const { operatorIds, whitelistingContract } = events.OperatorWhitelistingContractUpdated.decode(log);
     ctx.log.info(`Updating whitelisting contract for operators ${operatorIds} on network ${process.env.NETWORK}.`);
+    const rawDataString = JSON.stringify(log, customReplaceHelper);
+    const uniqueId = `${log.block.height}-${log.transactionIndex}-${log.logIndex}`;
+    let event = new Event({
+        id: uniqueId,
+        network: process.env.NETWORK,
+        version: process.env.VERSION,
+        logIndex: BigInt(log.logIndex),
+        transactionHash: log.block.hash,
+        transactionIndex: BigInt(log.transactionIndex),
+        event: EnumEvents.EVENT_OPERATOR_WHITELISTING_CONTRACT_UPDATED,
+        blockNumber: BigInt(log.block.height),
+        ownerAddress: null,
+        rawData: rawDataString,
+        createdAt: BigInt(Date.now()),
+        processed: BigInt(Date.now())
+    });
+    await ctx.store.upsert([event]);
+    ctx.log.info(`Save event OperatorWhitelistingContractUpdated`);
     const operatorIdsBigInt = operatorIds.map(id => BigInt(id));
     const operators = await ctx.store.find(Operator, {   where: {operatorId: In(operatorIdsBigInt), network: process.env.NETWORK,}});
     if (operators.length > 0) {
         operators.forEach((operator: Operator) => {
             operator.whitelistingContract = whitelistingContract;
+            operator.blockNumber = BigInt(log.block.height);
         });
 
         await ctx.store.upsert(operators);
